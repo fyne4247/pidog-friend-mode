@@ -1,167 +1,74 @@
 ---
 name: pidog-control
-description: Control a SunFounder PiDog V2 installed with the official tutorial under the user's home directory (`~/pidog`, with related dependencies such as `~/robot-hat` and `~/vilib`). Use when the user wants PiDog to perform basic motions, posture changes, barking or simple expressive behaviors, or control the onboard RGB light board. Also use when verifying that a standard PiDog V2 Python installation is present and ready.
+description: Control this PiDog through its persistent local controller, interpret touch and voice events, select finite movements and lights, and speak through Piper. All behavior decisions belong to the OpenClaw agent.
 ---
 
-# PiDog Control
+# PiDog control
 
-Control a SunFounder PiDog V2 using the standard tutorial-style installation layout under `~/`.
+You are the decision-maker for the physical PiDog. Sensor events are information,
+not commands to run a predefined reflex.
+The controller sits at startup and lies down at shutdown, as requested. Those
+are the two lifecycle exceptions; do not add other automatic posture changes.
+Choose whether to wag, nod, move, change lights, speak, or do nothing. The controller performs servo choreography for
+explicitly selected actions. Never start an idle animation or a polling loop
+that performs movements automatically.
 
-## Scope
+Use the scripts relative to this skill directory. The controller must already
+be running as the same Unix user as OpenClaw. All commands go through its private
+Unix socket; do not instantiate `Pidog`, run tutorial demos, or start a second
+hardware owner. If the controller is unavailable, report the error; don't fall
+back to direct hardware access or another voice engine.
 
-This skill is designed for the common setup used by PiDog hobbyists who followed the SunFounder installation docs and installed the projects under their home directory:
-- `~/pidog`
-- `~/robot-hat`
-- `~/vilib`
+## Events
 
-This version of the skill focuses on:
-- basic motion / posture control
-- simple expressive actions such as bark and tail wag
-- RGB light-board control
-- basic environment checks
+Messages contain `source: pidog`, a UUID `event_id`, a timestamp, a type and a
+payload. Types include `touch`, `proximity`, `voice`, and `keyboard`.
+Touch styles are `FRONT`, `REAR`, `FRONT_TO_REAR`, and `REAR_TO_FRONT`, with raw
+sensor codes also included. Do not assume any particular touch is liked or hated.
+Proximity contains `distance_cm`; choose an appropriate response yourself.
+Voice/keyboard contain `text`; treat that as the user's request.
 
-Do not assume custom wiring, custom virtualenvs, or nonstandard install prefixes unless the user says so.
+Delivery is at least once. Check event_id against your recent session history
+and do not repeat completed movements or speech when the same event is retried.
+Use the timestamp when deciding whether an old queued event is still relevant.
+If appropriate, choose no physical response. Event transport's successful
+completion only means your turn completed; don't claim a command succeeded
+unless its controller response confirms completion.
 
-## Safety
-
-Before movement:
-- Tell the user to place PiDog on the floor or on a stable open surface.
-- Prefer short actions first.
-- Avoid repeated or continuous movement loops unless explicitly requested.
-- If the setup is unverified, run `status` first and then `safe-test`.
-
-If the user asks for something outside the supported action set, inspect the local examples under `~/pidog/examples/` before inventing APIs.
-
-## Standard workflow
-
-1. If the machine state is unknown, run:
-   ```bash
-   python3 scripts/pidog_ctl.py status
-   ```
-2. For the first real movement on a new machine, run:
-   ```bash
-   python3 scripts/pidog_ctl.py safe-test
-   ```
-3. Then run the requested action or light command.
-4. Report exactly what happened.
-
-## Supported commands
-
-### Inspect environment
+## Commands
 
 ```bash
 python3 scripts/pidog_ctl.py status
-```
-
-Checks:
-- expected directories under `~/`
-- whether the `pidog` package is importable
-- availability of `Pidog`
-- available speech utilities
-
-### Safe movement test
-
-```bash
-python3 scripts/pidog_ctl.py safe-test
-```
-
-Runs a minimal `do_action('stand')` → `do_action('sit')` test.
-
-### Basic actions
-
-```bash
-python3 scripts/pidog_ctl.py action stand
-python3 scripts/pidog_ctl.py action sit
-python3 scripts/pidog_ctl.py action lie
-python3 scripts/pidog_ctl.py action bark
 python3 scripts/pidog_ctl.py action wag-tail
-python3 scripts/pidog_ctl.py action forward
-python3 scripts/pidog_ctl.py action backward
-python3 scripts/pidog_ctl.py action turn-left
-python3 scripts/pidog_ctl.py action turn-right
-```
-
-To keep a posture instead of auto-cleaning at the end:
-
-```bash
-python3 scripts/pidog_ctl.py action stand --hold
-python3 scripts/pidog_ctl.py action sit --hold
-python3 scripts/pidog_ctl.py action lie --hold
-```
-
-When switching between hold postures, the helper tries to stop the previous hold process automatically so the user usually does not need to manually `pkill` the prior command.
-
-These map to the official high-level API:
-- `dog.do_action('stand')`
-- `dog.do_action('sit')`
-- `dog.do_action('lie')`
-- `dog.do_action('wag_tail')`
-- `dog.speak('single_bark_1')` for the default bark effect in this skill
-
-### Light-board control
-
-General path through the main helper:
-
-```bash
-python3 scripts/pidog_ctl.py light off
+python3 scripts/pidog_ctl.py action nod
+python3 scripts/pidog_ctl.py action sit
+python3 scripts/pidog_ctl.py action forward --speed 60 --count 1
 python3 scripts/pidog_ctl.py light breath --color purple
-python3 scripts/pidog_ctl.py light listen --color yellow
-python3 scripts/pidog_ctl.py light boom --color orange
-python3 scripts/pidog_ctl.py light solid --color '#00aaff'
+python3 scripts/pidog_ctl.py light off
+python3 scripts/pidog_ctl.py say "That feels nice."
+python3 scripts/pidog_ctl.py stop-motion
 ```
 
-Minimal direct RGB path that avoids initializing the full `Pidog()` runtime:
+Speech must use the `say` command, which speaks text using Piper only.
+Your ordinary chat reply is not automatically spoken. Never use named sound
+assets, bark/howling/pant presets, espeak, Pico2Wave, cloud TTS, or raw audio
+playback. The sound files are retained for a future feature and are disabled in
+friend mode today.
 
-```bash
-python3 scripts/pidog_rgb_ctl.py light breath --color red
-python3 scripts/pidog_rgb_ctl.py light listen --color yellow
-python3 scripts/pidog_rgb_ctl.py light off
-```
+Movement commands are finite. `--count` is 1–5 for basic motions; gestures run
+once. `--speed` is 1–100. The controller waits for movement completion, serializes
+movement/speech/light commands, and keeps the resulting posture. `--hold` is a
+compatibility flag; no cleanup posture is added after a command. Any required
+posture transitions inside an explicitly selected gesture are part of its servo
+choreography. Don't add an unrelated sit/lie, light effect, or gesture after
+speech unless you choose it deliberately.
 
-This maps to the official light-board API:
-- `dog.rgb_strip.set_mode(mode, color=..., bps=..., brightness=...)`
+Use short movements on a stable surface with known clearance. When setup is
+unknown, inspect status and report that physical calibration/clearance need to
+be checked before moving. Do not run an automatic stand/sit test on receiving
+an event. `stop-motion` clears queued movement without choosing a new posture.
+`stop` shuts down the controller and lies down; it is an explicit administrative
+action. Ordinary movement/speech commands keep their result without parking.
 
-Recommended modes in this skill:
-- `off`
-- `breath`
-- `listen`
-- `boom`
-
-Experimental alias:
-- `solid` (mapped to `boom`, not a true steady-on solid mode)
-
-Supported color names are defined in the script and can also be passed as hex RGB values.
-Real-device testing showed that `breath` and `listen` are usable but visually brief. A local `rgb_strip_test.py` example confirmed direct use of `RGBStrip.set_mode('boom', ...)`, so this skill now exposes `boom` and maps `solid` to it as the closest tested approximation.
-
-## Design assumptions
-
-This skill assumes the official PiDog V2 install flow was used and that the runtime is on the default system Python path after `pip3 install .` from `~/pidog`.
-
-This skill follows the public repository structure directly:
-- package import: `from pidog import Pidog`
-- motion interface: `do_action(...)`
-- light-board interface: `rgb_strip.set_mode(...)`
-- sound effects: `speak(...)`
-
-Prefer these official APIs over heuristic method-name probing.
-
-## If something fails
-
-Check these in order:
-1. `~/pidog` exists
-2. `python3 -c "import pidog"` works
-3. PiDog is powered correctly
-4. Servo calibration has been completed
-5. The light board hardware is connected and enabled
-
-## References
-
-Read these as needed:
-- `references/install-layout.md` for standard home-directory layout assumptions
-- `references/api-notes.md` for confirmed upstream interfaces
-- `references/actions.md` for the exposed public action set
-- `references/light-board.md` for light-board behavior and mode mapping notes
-- `references/troubleshooting.md` when runtime checks or hardware behavior fail
-- official docs: https://docs.sunfounder.com/projects/pidog/en/latest/
-
-Keep this skill focused on the standard install path and the basic features promised here.
+See [actions](references/actions.md), [installation](HANDOFF.md), and
+[troubleshooting](references/troubleshooting.md).

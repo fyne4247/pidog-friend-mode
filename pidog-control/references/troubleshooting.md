@@ -1,53 +1,31 @@
-# PiDog Troubleshooting
+# Troubleshooting
 
-Use this checklist when the helper script or skill does not behave as expected.
+Inspect `status` and `journalctl --user -u pidog-agent.service`, or the foreground
+controller output. A background `start` writes `~/.openclaw/pidog-control/controller.log`.
 
-## Import fails
+- **Import/agent_control errors:** install this fork in the controller's Python
+  environment; stock PiDog lacks the new agent-control flag. Python 3.11+ is
+  required by the existing enum code.
+- **Missing controller socket:** start the user service/foreground controller.
+  Commands never fall back to direct hardware access.
+- **OpenClaw CLI unavailable:** configure an absolute `--openclaw-cli` path and
+  run as the account owning OpenClaw. Confirm Gateway/model credentials and
+  `openclaw agent --agent main --message "test" --json` in that account.
+- **Pending events:** failed turns are retained and retried. `status` includes
+  the oldest sanitized error. Check Gateway health and skill/exec permissions.
+- **Required sensor reporting failure:** check touch wiring/GPIO permissions.
+  The controller exits rather than continuing without petting messages.
+- **Voice input stopped:** verify Vosk model, microphone and audio permissions.
+  Voice-enabled operation exits if the audio input loop fails.
+- **No speech:** the agent must explicitly use `say`. Check Piper model/audio
+  setup and speaker enablement. No alternate speech engine is used on failure.
+- **Unexpected motion:** keep manual demos and direct hardware scripts stopped.
+  Use only the skill's controller commands. Startup sit and shutdown lie
+  are the two intentionally retained posture automations. Inspect agent history for deliberate
+  decisions; touch events themselves never select a motion.
+- **Duplicate controller:** stop the existing service/process. The hardware lock
+  is separate from the socket and prevents two agent-mode owners.
 
-Symptoms:
-- `import pidog` fails
-- `python3 scripts/pidog_ctl.py status` reports unavailable runtime
-
-Checks:
-1. Confirm `~/pidog` exists
-2. Confirm the package was installed with `pip3 install .` from `~/pidog`
-3. Confirm dependencies were installed from `~/robot-hat` and `~/vilib`
-4. Confirm the command is using the same Python environment where PiDog was installed
-
-## Robot initializes but movement fails
-
-Checks:
-1. Confirm power supply is adequate
-2. Confirm the robot completed servo calibration
-3. Confirm I2C-related hardware is connected correctly
-4. Try `lie` or `sit` before more complex actions
-
-## Sound works inconsistently
-
-The upstream PiDog code warns that sound playback may require sudo in some environments.
-The `Pidog.speak()` implementation also kills `pulseaudio` in some cases to work around VNC/audio issues.
-
-Real-device validation on this setup showed an additional case:
-- `speak('bark')` can fail with `No sound found for bark`
-
-So this skill now treats missing named sounds as a real failure instead of printing a false success message.
-
-## Light board does not behave as expected
-
-Checks:
-1. Confirm the `rgb_strip` hardware is present and initialized
-2. Try `breath` before other modes
-3. If one mode fails but another works, keep the mode mapping change in `scripts/pidog_ctl.py`
-
-Real-device validation on this setup showed:
-- `breath` works, but the visible effect may be brief or limited rather than a long obvious animation
-- `listen` works, but may present as a very short flowing effect
-- `off` works
-- `solid` is not reliable as a true solid mode through the current compatibility mapping, and shutdown produced `_rgb_strip_thread Exception:list index out of range`
-
-Treat that shutdown exception as a known cleanup edge case to investigate if it recurs.
-Prefer `breath`, `listen`, `boom`, and `off` as the stable public light controls for now.
-
-## Close/cleanup behavior
-
-Use `dog.close()` when finishing. The upstream class performs a full shutdown routine and returns PiDog to a resting position.
+`solid` is an alias for `boom`, not a true steady light. LEDs change only through
+explicit agent commands. `say "bark"` speaks the word through Piper; it does not
+play a bark recording. `action bark` is deliberately unavailable.

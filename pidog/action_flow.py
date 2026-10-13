@@ -228,19 +228,9 @@ class ActionFlow():
             print(f'action error: {e}')
     
     def action_handler(self):
-        standby_actions = ['waiting', 'feet_left_right']
-        standby_weights = [1, 0.3]
-
-        action_interval = 5 # seconds
-        last_action_time = time.time()
-
         while self.thread_running:
             if self.thread_action_state == ActionStatus.STANDBY:
-                if time.time() - last_action_time > action_interval:
-                    choice = random.choices(standby_actions, standby_weights)[0]
-                    self.run(choice)
-                    last_action_time = time.time()
-                    action_interval = random.randint(2, 6)
+                pass
             elif self.thread_action_state == ActionStatus.THINK:
                 pass
             elif self.thread_action_state == ActionStatus.ACTIONS:
@@ -252,7 +242,6 @@ class ActionFlow():
 
                 if self.action_queue.empty():
                     self.thread_action_state = ActionStatus.STANDBY
-                    last_action_time = time.time()
 
                 time.sleep(0.5)
 

@@ -125,11 +125,13 @@ class Pidog():
 
     # init
     def __init__(self, leg_pins=DEFAULT_LEGS_PINS, head_pins=DEFAULT_HEAD_PINS, tail_pin=DEFAULT_TAIL_PIN,
-                 leg_init_angles=None, head_init_angles=None, tail_init_angle=None):
+                 leg_init_angles=None, head_init_angles=None, tail_init_angle=None,
+                 agent_control=False):
 
-
-        utils.reset_mcu()
-        sleep(0.2)
+        self.agent_control = bool(agent_control)
+        if not self.agent_control:
+            utils.reset_mcu()
+            sleep(0.2)
 
         from .actions_dictionary import ActionDict
         self.actions_dict = ActionDict()
@@ -168,11 +170,13 @@ class Pidog():
             debug(f"config_file: {config_file}")
             debug("robot_hat init ... ", end='', flush=True)
             self.legs = Robot(pin_list=leg_pins, name='legs', init_angles=leg_init_angles, init_order=[
-                            0, 2, 4, 6, 1, 3, 5, 7], db=config_file)
+                            0, 2, 4, 6, 1, 3, 5, 7] if not self.agent_control else [], db=config_file)
             self.head = Robot(pin_list=head_pins, name='head',
-                            init_angles=head_init_angles, db=config_file)
+                            init_angles=head_init_angles,
+                            init_order=[] if self.agent_control else None, db=config_file)
             self.tail = Robot(pin_list=tail_pin, name='tail',
-                            init_angles=tail_init_angle, db=config_file)
+                            init_angles=tail_init_angle,
+                            init_order=[] if self.agent_control else None, db=config_file)
             # add thread
             self.thread_list.extend(["legs", "head", "tail"])
             # via
@@ -222,7 +226,10 @@ class Pidog():
             debug("rgb_strip init ... ", end='', flush=True)
             self.rgb_thread_run = True
             self.rgb_strip = RGBStrip(addr=0X74, nums=11)
-            self.rgb_strip.set_mode('breath', 'black')
+            if self.agent_control:
+                self.rgb_strip.set_mode('monochromatic', 'black')
+            else:
+                self.rgb_strip.set_mode('breath', 'black')
             self.rgb_fail_count = 0
             # add rgb thread
             self.thread_list.append("rgb")
@@ -271,6 +278,10 @@ class Pidog():
         self.exit_flag = True
 
     def close(self):
+        if self.agent_control:
+            self._close_agent_control()
+            return
+
         import signal
         import sys
 
@@ -325,6 +336,53 @@ class Pidog():
             # signal.signal(signal.SIGINT, signal.SIG_DFL)
             # signal.alarm(0)
             # sys.exit(0)
+
+    def _close_agent_control(self):
+        """Stop workers and release devices without commanding a new pose."""
+        self.exit_flag = True
+        self._sensory_exit_flag = True
+
+        for buffer_name, lock_name in (
+                ('legs_action_buffer', 'legs_thread_lock'),
+                ('head_action_buffer', 'head_thread_lock'),
+                ('tail_action_buffer', 'tail_thread_lock')):
+            lock = getattr(self, lock_name, None)
+            buffer = getattr(self, buffer_name, None)
+            if lock is not None and buffer is not None:
+                with lock:
+                    buffer.clear()
+
+        for device_name in ('dual_touch', 'ears', 'ultrasonic'):
+            device = getattr(self, device_name, None)
+            if device is not None:
+                try:
+                    device.close()
+                except Exception as e:
+                    error(f'Close error ({device_name}): {e}')
+
+        if 'rgb' in getattr(self, 'thread_list', ()):
+            self.rgb_thread_run = False
+
+        worker_names = ['legs_thread', 'head_thread', 'tail_thread']
+        if 'rgb' in getattr(self, 'thread_list', ()):
+            worker_names.append('rgb_strip_thread')
+        if 'imu' in getattr(self, 'thread_list', ()):
+            worker_names.append('imu_thread')
+        for worker_name in worker_names:
+            worker = getattr(self, worker_name, None)
+            if worker is not None and worker is not threading.current_thread():
+                worker.join()
+
+        sensory_worker = getattr(self, 'sensory_process', None)
+        if sensory_worker is not None:
+            sensory_worker.join(timeout=1)
+
+        if 'rgb' in getattr(self, 'thread_list', ()):
+            try:
+                self.rgb_strip.close()
+            except Exception as e:
+                error(f'Close error (rgb_strip): {e}')
+        info('Quit')
 
     def legs_simple_move(self, angles_list, speed=90):
 
@@ -641,6 +699,8 @@ class Pidog():
         :param volume: volume, 0-100
         :type volume: int
         """
+        if self.agent_control:
+            raise RuntimeError("Sound playback is disabled in agent control mode")
         if not is_run_with_root and not hasattr(self, "speak_first"):
             self.speak_first = True
             # warn("Play sound needs to be run with sudo.")
@@ -665,6 +725,8 @@ class Pidog():
         :param volume: volume, 0-100
         :type volume: int
         """
+        if self.agent_control:
+            raise RuntimeError("Sound playback is disabled in agent control mode")
         if not is_run_with_root and not hasattr(self, "speak_first"):
             self.speak_first = True
             # warn("Play sound needs to be run with sudo.")

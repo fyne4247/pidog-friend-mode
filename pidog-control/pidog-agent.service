@@ -1,0 +1,15 @@
+[Unit]
+Description=PiDog controller for the OpenClaw main agent
+After=network-online.target
+
+[Service]
+Type=simple
+Environment="PATH=%h/.local/bin:%h/.npm-global/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=/usr/bin/python3 %h/.openclaw/workspace/skills/pidog-control/scripts/pidog_ctl.py serve --agent main --voice
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=300
+UMask=0077
+
+[Install]
+WantedBy=default.target
